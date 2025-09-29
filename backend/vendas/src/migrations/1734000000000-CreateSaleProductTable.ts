@@ -26,6 +26,7 @@ export class CreateSaleProductTable1734000000000 implements MigrationInterface {
                 "id" INTEGER PRIMARY KEY AUTOINCREMENT,
                 "sale_id" INTEGER NOT NULL,
                 "product_id" INTEGER NOT NULL,
+                "unit_price" INTEGER NOT NULL,
                 "qtd" INTEGER NOT NULL,
                 "discount" INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY ("sale_id") REFERENCES "sales"("id") ON DELETE CASCADE,

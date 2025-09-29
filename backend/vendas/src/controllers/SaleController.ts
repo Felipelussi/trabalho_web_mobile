@@ -18,7 +18,7 @@ export class SaleController {
         res.json(sales.map(sale => ({
             id: sale.id,
             date: sale.created_at,
-            total: sale.saleProducts.reduce((acc, sp) => acc + sp.qtd * (sp.product.price - sp.discount), 0),
+            total: sale.saleProducts.reduce((acc, sp) => acc + sp.qtd * (sp.unit_price - sp.discount), 0),
         })));
     }
 
@@ -33,11 +33,11 @@ export class SaleController {
         res.json({
             id: sale.id,
             date: sale.created_at,
-            total: sale.saleProducts.reduce((acc, sp) => acc + sp.qtd * (sp.product.price - sp.discount), 0),
+            total: sale.saleProducts.reduce((acc, sp) => acc + sp.qtd * (sp.unit_price - sp.discount), 0),
             products: sale.saleProducts.map(sp => ({
-                id: sp.product.id,
+                productId: sp.product.id,
                 name: sp.product.name,
-                price: sp.product.price,
+                price: sp.unit_price,
                 qtd: sp.qtd,
                 discount: sp.discount
             }))
@@ -77,6 +77,7 @@ export class SaleController {
                     const saleProduct = saleProductRepo.create({
                         sale_id: sale.id,
                         product_id: sp.productId,
+                        unit_price: sp.price,
                         qtd: sp.qtd,
                         discount: sp.discount || 0
                     });
@@ -117,7 +118,7 @@ export class SaleController {
     static async updateSale(req: Request, res: Response) {
         try {
             const saleId = Number(req.params.id);
-            const {  products } = req.body;
+            const {products} = req.body;
 
             if (!products || !Array.isArray(products)) {
                 return res.status(400).json({ 
@@ -158,6 +159,7 @@ export class SaleController {
                 const saleProduct = saleProductRepo.create({
                     sale_id: saleId,
                     product_id: sp.productId,
+                    unit_price: sp.price,
                     qtd: sp.qtd,
                     discount: sp.discount || 0
                 });

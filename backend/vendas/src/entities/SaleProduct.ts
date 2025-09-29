@@ -19,6 +19,9 @@ export class SaleProduct {
     @Column({ name: 'product_id' })
     product_id!: number;
 
+    @Column({name: 'unit_price', type: 'integer'})
+    unit_price!: number;
+
     @Column({ type: 'integer' })
     qtd!: number;
 

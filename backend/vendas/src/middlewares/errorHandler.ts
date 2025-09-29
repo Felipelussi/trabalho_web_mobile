@@ -8,21 +8,6 @@ export const errorHandler = (
 ) => {
     console.error('Error:', error);
 
-    // Multer errors
-    if (error instanceof Error && error.message === 'Only image files are allowed') {
-        return res.status(400).json({
-            message: 'Only image files are allowed',
-            error: 'INVALID_FILE_TYPE'
-        });
-    }
-
-    if (error.code === 'LIMIT_FILE_SIZE') {
-        return res.status(400).json({
-            message: 'File size too large. Maximum size is 5MB',
-            error: 'FILE_TOO_LARGE'
-        });
-    }
-
     // Database errors
     if (error.code === '23505') { // Unique constraint violation
         return res.status(409).json({
