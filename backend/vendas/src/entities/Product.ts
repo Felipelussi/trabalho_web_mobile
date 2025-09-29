@@ -17,9 +17,6 @@ export class Product {
     @Column({ type: 'integer' })
     price!: number;
 
-    @Column({ type: "text", nullable: true })
-    image_url?: string;
-
     @OneToMany(() => SaleProduct, saleProduct => saleProduct.product)
     saleProducts!: SaleProduct[];
 }

@@ -3,6 +3,7 @@ import { AppDataSource } from "@config/data-source";
 import { Sale } from "@entities/Sale";
 import { Product } from "@entities/Product";
 import { SaleProduct } from "@entities/SaleProduct";
+import {In} from "typeorm";
 
 const saleRepo = AppDataSource.getRepository(Sale);
 const productRepo = AppDataSource.getRepository(Product);
@@ -14,7 +15,11 @@ export class SaleController {
             order: { id: 'ASC' },
             relations: { saleProducts: { product: true } }
         });
-        res.json(sales);
+        res.json(sales.map(sale => ({
+            id: sale.id,
+            date: sale.created_at,
+            total: sale.saleProducts.reduce((acc, sp) => acc + sp.qtd * (sp.product.price - sp.discount), 0),
+        })));
     }
 
     static async get(req: Request, res: Response) {
@@ -24,14 +29,79 @@ export class SaleController {
             relations: { saleProducts: { product: true } }
         });
         if (!sale) return res.status(404).json({ message: 'Sale not found' });
-        res.json(sale);
+        
+        res.json({
+            id: sale.id,
+            date: sale.created_at,
+            total: sale.saleProducts.reduce((acc, sp) => acc + sp.qtd * (sp.product.price - sp.discount), 0),
+            products: sale.saleProducts.map(sp => ({
+                id: sp.product.id,
+                name: sp.product.name,
+                price: sp.product.price,
+                qtd: sp.qtd,
+                discount: sp.discount
+            }))
+        });
     }
 
     static async create(req: Request, res: Response) {
         try {
+            const { products } = req.body;
+
+            // Create the sale first
             const sale = saleRepo.create({});
             await saleRepo.save(sale);
-            res.json(sale);
+
+            // If products array is provided, validate and add products to the sale
+            if (products && Array.isArray(products)) {
+                // Validate each product
+                for (const sp of products) {
+                    if (!sp.productId || sp.qtd === undefined || sp.qtd < 0) {
+                        return res.status(400).json({ 
+                            message: 'Each product must have productId and valid qtd (>= 0)'
+                        });
+                    }
+                }
+
+                // Validate all products exist
+                const productIds = products.map(sp => sp.productId);
+                const productsAvailable = await productRepo.find({where: { id: In(productIds) }});
+                
+                if (productsAvailable.length !== productIds.length) {
+                    return res.status(404).json({ message: 'One or more products not found' });
+                }
+
+                // Create SaleProduct entries
+                const newSaleProducts = [];
+                for (const sp of products) {
+                    const saleProduct = saleProductRepo.create({
+                        sale_id: sale.id,
+                        product_id: sp.productId,
+                        qtd: sp.qtd,
+                        discount: sp.discount || 0
+                    });
+                    newSaleProducts.push(saleProduct);
+                }
+
+                await saleProductRepo.save(newSaleProducts);
+
+                // Return the sale with products
+                const createdSale = await saleRepo.findOne({
+                    where: { id: sale.id },
+                    relations: { saleProducts: { product: true } }
+                });
+
+                res.json({
+                    message: 'Sale created successfully',
+                    sale: createdSale
+                });
+            } else {
+                // Return the sale without products (backward compatibility)
+                res.json({
+                    message: 'Sale created successfully',
+                    sale: sale
+                });
+            }
         } catch (error) {
             res.status(500).json({ message: 'Error creating sale', error });
         }
@@ -44,15 +114,23 @@ export class SaleController {
         res.status(204).send();
     }
 
-    static async addProduct(req: Request, res: Response) {
+    static async updateSale(req: Request, res: Response) {
         try {
             const saleId = Number(req.params.id);
-            const { productId, qtd, discount = 0 } = req.body;
+            const {  products } = req.body;
 
-            if (!productId || !qtd || qtd <= 0) {
+            if (!products || !Array.isArray(products)) {
                 return res.status(400).json({ 
-                    message: 'Product ID and quantity (greater than 0) are required' 
+                    message: 'products array is required'
                 });
+            }
+
+            for (const sp of products) {
+                if (!sp.productId || sp.qtd === undefined || sp.qtd < 0) {
+                    return res.status(400).json({ 
+                        message: 'Each product must have productId and valid qtd (>= 0)'
+                    });
+                }
             }
 
             const sale = await saleRepo.findOne({
@@ -64,126 +142,41 @@ export class SaleController {
                 return res.status(404).json({ message: 'Sale not found' });
             }
 
-            const product = await productRepo.findOneBy({ id: productId });
-            if (!product) {
-                return res.status(404).json({ message: 'Product not found' });
+            const productIds = products.map(sp => sp.productId);
+            const productsAvailable= await productRepo.find({where: { id: In(productIds) }});
+            
+            if (productsAvailable.length !== productIds.length) {
+                return res.status(404).json({ message: 'One or more products not found' });
             }
 
-            const existingSaleProduct = sale.saleProducts?.find(sp => sp.product_id === productId);
+            if (sale.saleProducts && sale.saleProducts.length > 0) {
+                await saleProductRepo.remove(sale.saleProducts);
+            }
 
-            if (existingSaleProduct) {
-                existingSaleProduct.qtd += qtd;
-                await saleProductRepo.save(existingSaleProduct);
-                
-                const updatedSaleProduct = await saleProductRepo.findOne({
-                    where: { id: existingSaleProduct.id },
-                    relations: { product: true }
-                });
-                
-                return res.json({
-                    message: 'Product quantity updated',
-                    saleProduct: updatedSaleProduct
-                });
-            } else {
+            const newSaleProducts = [];
+            for (const sp of products) {
                 const saleProduct = saleProductRepo.create({
                     sale_id: saleId,
-                    product_id: productId,
-                    qtd,
-                    discount
+                    product_id: sp.productId,
+                    qtd: sp.qtd,
+                    discount: sp.discount || 0
                 });
-                
-                await saleProductRepo.save(saleProduct);
-                
-                const savedSaleProduct = await saleProductRepo.findOne({
-                    where: { id: saleProduct.id },
-                    relations: { product: true }
-                });
-                
-                return res.json({
-                    message: 'Product added to sale',
-                    saleProduct: savedSaleProduct
-                });
-            }
-        } catch (error) {
-            res.status(500).json({ message: 'Error adding product to sale', error });
-        }
-    }
-
-    static async removeProduct(req: Request, res: Response) {
-        try {
-            const saleId = Number(req.params.id);
-            const { productId } = req.body;
-
-            if (!productId) {
-                return res.status(400).json({ message: 'Product ID is required' });
+                newSaleProducts.push(saleProduct);
             }
 
-            const sale = await saleRepo.findOne({
+            await saleProductRepo.save(newSaleProducts);
+
+            const updatedSale = await saleRepo.findOne({
                 where: { id: saleId },
-                relations: { saleProducts: true }
-            });
-
-            if (!sale) {
-                return res.status(404).json({ message: 'Sale not found' });
-            }
-
-            const saleProduct = sale.saleProducts?.find(sp => sp.product_id === productId);
-
-            if (!saleProduct) {
-                return res.status(404).json({ message: 'Product not found in this sale' });
-            }
-
-            await saleProductRepo.remove(saleProduct);
-            res.json({ message: 'Product removed from sale' });
-        } catch (error) {
-            res.status(500).json({ message: 'Error removing product from sale', error });
-        }
-    }
-
-    static async updateProductQuantity(req: Request, res: Response) {
-        try {
-            const saleId = Number(req.params.id);
-            const { productId, qtd, discount } = req.body;
-
-            if (!productId || qtd === undefined || qtd < 0) {
-                return res.status(400).json({ 
-                    message: 'Product ID and valid quantity are required' 
-                });
-            }
-
-            const sale = await saleRepo.findOne({
-                where: { id: saleId },
-                relations: { saleProducts: true }
-            });
-
-            if (!sale) {
-                return res.status(404).json({ message: 'Sale not found' });
-            }
-
-            const saleProduct = sale.saleProducts?.find(sp => sp.product_id === productId);
-
-            if (!saleProduct) {
-                return res.status(404).json({ message: 'Product not found in this sale' });
-            }
-
-            saleProduct.qtd = qtd;
-            if (discount !== undefined) {
-                saleProduct.discount = discount;
-            }
-
-            await saleProductRepo.save(saleProduct);
-
-            const updatedSaleProduct = await saleProductRepo.findOne({
-                where: { id: saleProduct.id },
-                relations: { product: true }
+                relations: { saleProducts: { product: true } }
             });
 
             res.json({
-                message: 'Product updated in sale',
-                saleProduct: updatedSaleProduct
+                message: 'Sale updated successfully',
+                sale: updatedSale
             });
         } catch (error) {
-            res.status(500).json({ message: 'Error updating product in sale', error });
+            res.status(500).json({ message: 'Error updating sale', error });
         }
     }
 }
